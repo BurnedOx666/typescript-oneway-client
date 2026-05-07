@@ -34,13 +34,32 @@ export interface PaymentPayload {
   return_url: string;
   ip: string;
   user_agent: string;
+  payment_method?: "upi" | "card" | "netbanking" | "wallet";
   country_code?: string;
   meta_data?: Record<string, any> | null;
+  capture_mode?: "manual" | "automatic";
+  capture_expiry_period?: number;
+  refund_speed?: "normal" | "optimum";
   recurring_conf?: {
     interval?: "DAY" | "WEEK" | "MONTH";
     interval_count?: number;
     total_recurrence?: number;
   };
+}
+
+export interface CapturePaymentPayload {
+  payment_id: string;
+  amount?: number;
+}
+
+export interface RefundPaymentPayload {
+  payment_id: string;
+  amount?: number;
+  speed?: "normal" | "optimum";
+}
+
+export interface DeactivateSubscriptionPayload {
+  payment_id: string;
 }
 
 export interface PaymentIntent {
@@ -55,13 +74,16 @@ export interface PaymentIntent {
   return_url: string | null;
   payment_method: string | null;
   status:
+    | "created"
     | "pending"
+    | "received"
     | "success"
     | "failed"
     | "processing"
     | "refunded"
     | "cancelled";
   renew_id: string | null;
+  plan_id: string | null;
   subscription_status: "active" | "inactive" | null;
   next_billing_date: string | null;
   provider_id: string;
@@ -81,6 +103,11 @@ export interface PaymentLink {
   payment_intent: PaymentIntent;
 }
 
+export interface PaymentMethodInfo {
+  slug: string;
+  logo: string | null;
+}
+
 export interface PaymentProvider {
   id: string;
   name: string;
@@ -88,6 +115,7 @@ export interface PaymentProvider {
   logo: string | null;
   description: string | null;
   is_recommended: boolean;
+  payment_methods: PaymentMethodInfo[];
 }
 
 export function decodeWebhookPayload(payload: string, signature: string) {
@@ -148,6 +176,8 @@ export default class OnepayClient {
     );
   }
 
+  // ── Contacts ───────────────────────────────────────────────
+
   public async createContact(data: ContactPayload): Promise<string> {
     const res = await this.http.post<OnepayResponse<{ contact_id: string }>>(
       "/v1/contacts",
@@ -174,6 +204,8 @@ export default class OnepayClient {
     await this.http.put(`/v1/contacts/${contactId}`, payload);
   }
 
+  // ── Providers & Payment Methods ────────────────────────────
+
   public async getProviders(ip?: string, countryCode?: string) {
     const res = await this.http.get<OnepayResponse<PaymentProvider[]>>(
       "/v1/payments/providers",
@@ -187,6 +219,21 @@ export default class OnepayClient {
     return res.data.data;
   }
 
+  public async getPaymentMethods(ip?: string, countryCode?: string) {
+    const res = await this.http.get<OnepayResponse<any[]>>(
+      "/v1/payments/methods",
+      {
+        params: {
+          ip,
+          country_code: countryCode,
+        },
+      }
+    );
+    return res.data.data;
+  }
+
+  // ── Payments ───────────────────────────────────────────────
+
   public async createPayment(data: PaymentPayload) {
     const res = await this.http.post<OnepayResponse<PaymentLink>>(
       "/v1/payments/intent",
@@ -198,6 +245,30 @@ export default class OnepayClient {
   public async getPayment(paymentId: string) {
     const res = await this.http.get<OnepayResponse<PaymentIntent>>(
       `/v1/payments/intent/${paymentId}`
+    );
+    return res.data.data;
+  }
+
+  public async capturePayment(data: CapturePaymentPayload) {
+    const res = await this.http.post<OnepayResponse<{ success: boolean }>>(
+      "/v1/payments/capture",
+      { ...data }
+    );
+    return res.data.data;
+  }
+
+  public async refundPayment(data: RefundPaymentPayload) {
+    const res = await this.http.post<OnepayResponse<{ success: boolean }>>(
+      "/v1/payments/refund",
+      { ...data }
+    );
+    return res.data.data;
+  }
+
+  public async deactivateSubscription(data: DeactivateSubscriptionPayload) {
+    const res = await this.http.post<OnepayResponse<any>>(
+      "/v1/payments/subscription/plan/deactivate",
+      { ...data }
     );
     return res.data.data;
   }
