@@ -32,15 +32,6 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -51,24 +42,54 @@ const axios_1 = __importDefault(require("axios"));
 const jwt = __importStar(require("jsonwebtoken"));
 const crypto_js_1 = require("crypto-js");
 class OnepayException extends Error {
-    constructor(code, message) {
-        super(`[${code}] ${message}`);
+    constructor(code, message, options) {
+        super(message, options);
         this.code = code;
-        this.message = message;
+        this.name = "OnepayException";
+        // Keeps `err instanceof OnepayException` working when a consumer compiles
+        // this package down to ES5.
+        Object.setPrototypeOf(this, OnepayException.prototype);
     }
 }
 exports.OnepayException = OnepayException;
-function decodeWebhookPayload(payload, signature) {
+function isOnepayResponse(value) {
+    return (typeof value === "object" &&
+        value !== null &&
+        "status" in value &&
+        "code" in value);
+}
+// ── Webhooks ───────────────────────────────────────────────
+/**
+ * Verify and decode a webhook delivery.
+ *
+ * OnePay posts `{ "payload": "<jwt>" }`, where the JWT is the payment record
+ * signed with the webhook's secret using HS256.
+ *
+ * @param payload The `payload` string from the webhook body.
+ * @param secret  The webhook secret from the OnePay dashboard.
+ */
+function decodeWebhookPayload(payload, secret) {
+    let decoded;
     try {
-        const decoded = jwt.verify(payload, signature, { algorithms: ["HS256"] });
-        return decoded;
+        decoded = jwt.verify(payload, secret, { algorithms: ["HS256"] });
     }
     catch (err) {
-        throw new OnepayException(400, "Invalid webhook signature");
+        throw new OnepayException(400, "Invalid webhook signature", { cause: err });
     }
+    if (typeof decoded !== "object" || decoded === null) {
+        throw new OnepayException(400, "Invalid webhook payload");
+    }
+    return decoded;
 }
+// ── Client ─────────────────────────────────────────────────
 class OnepayClient {
-    constructor(domain, apiKey, secretKey, timeout = 30) {
+    /**
+     * @param domain    Base URL of the OnePay API, e.g. `https://api.example.com`.
+     * @param apiKey    Public key, sent as `X-ACCESS-KEY`.
+     * @param secretKey Private key, used to sign each request.
+     * @param timeout   Per-request timeout in **milliseconds**. Defaults to 30s.
+     */
+    constructor(domain, apiKey, secretKey, timeout = 30000) {
         this.domain = domain;
         this.apiKey = apiKey;
         this.secretKey = secretKey;
@@ -88,7 +109,7 @@ class OnepayClient {
             return config;
         });
         this.http.interceptors.response.use((res) => {
-            if (!res.data) {
+            if (!isOnepayResponse(res.data)) {
                 throw new OnepayException(500, "No data received from OnePay API");
             }
             else if (res.data.status !== "success") {
@@ -98,66 +119,87 @@ class OnepayClient {
                 return res;
             }
         }, (error) => {
-            var _a;
-            const data = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data;
-            if (data) {
-                throw new OnepayException(data.code, data.msg || "Unknown error");
+            const response = error.response;
+            if (isOnepayResponse(response?.data)) {
+                throw new OnepayException(response.data.code, response.data.msg || "Unknown error", { cause: error });
             }
-            else {
-                throw new OnepayException(500, "No data received from OnePay API");
+            // A response that is not the OnePay envelope — a gateway error page, a
+            // proxy timeout, an HTML 5xx. Report the transport status rather than
+            // reading `code`/`msg` off a body that has neither.
+            if (response) {
+                throw new OnepayException(response.status, `Unexpected response from OnePay API (HTTP ${response.status})`, { cause: error });
             }
+            // No response at all: DNS failure, connection refused, client timeout,
+            // aborted request. `error.message` is the only thing that says which.
+            throw new OnepayException(500, `Failed to reach OnePay API: ${error.message}`, { cause: error });
         });
     }
-    createContact(data) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const res = yield this.http.post("/v1/contacts", Object.assign({}, data));
-            return res.data.data.contact_id;
-        });
+    // ── Contacts ───────────────────────────────────────────────
+    async createContact(data) {
+        const res = await this.http.post("/v1/contacts", { ...data });
+        return res.data.data.contact_id;
     }
-    updateContact(contactId, data) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const payload = {};
-            if (typeof data.name === "string")
-                payload.name = data.name;
-            if (typeof data.phone === "string")
-                payload.phone = data.phone;
-            if (typeof data.email === "string")
-                payload.email = data.email;
-            if (typeof data.street === "string")
-                payload.street = data.street;
-            if (typeof data.city === "string")
-                payload.city = data.city;
-            if (typeof data.state === "string")
-                payload.state = data.state;
-            if (typeof data.zip_code === "string")
-                payload.zip_code = data.zip_code;
-            if (typeof data.country === "string")
-                payload.country = data.country;
-            yield this.http.put(`/v1/contacts/${contactId}`, payload);
-        });
+    async updateContact(contactId, data) {
+        const payload = {};
+        if (typeof data.name === "string")
+            payload.name = data.name;
+        if (typeof data.phone === "string")
+            payload.phone = data.phone;
+        if (typeof data.email === "string")
+            payload.email = data.email;
+        if (typeof data.street === "string")
+            payload.street = data.street;
+        if (typeof data.city === "string")
+            payload.city = data.city;
+        if (typeof data.state === "string")
+            payload.state = data.state;
+        if (typeof data.zip_code === "string")
+            payload.zip_code = data.zip_code;
+        if (typeof data.country === "string")
+            payload.country = data.country;
+        await this.http.put(`/v1/contacts/${contactId}`, payload);
     }
-    getProviders(ip, countryCode) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const res = yield this.http.get("/v1/payments/providers", {
-                params: {
-                    ip,
-                    country_code: countryCode,
-                },
-            });
-            return res.data.data;
+    // ── Providers & Payment Methods ────────────────────────────
+    /** Either `ip` or `countryCode` must be supplied. */
+    async getProviders(ip, countryCode) {
+        const res = await this.http.get("/v1/payments/providers", {
+            params: {
+                ip,
+                country_code: countryCode,
+            },
         });
+        return res.data.data;
     }
-    createPayment(data) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const res = yield this.http.post("/v1/payments/intent", Object.assign({}, data));
-            return res.data.data;
+    /** Either `ip` or `countryCode` must be supplied. */
+    async getPaymentMethods(ip, countryCode) {
+        const res = await this.http.get("/v1/payments/methods", {
+            params: {
+                ip,
+                country_code: countryCode,
+            },
         });
+        return res.data.data;
     }
-    getPayment(paymentId) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const res = yield this.http.get(`/v1/payments/intent/${paymentId}`);
-            return res.data.data;
-        });
+    // ── Payments ───────────────────────────────────────────────
+    async createPayment(data) {
+        const res = await this.http.post("/v1/payments/intent", { ...data });
+        return res.data.data;
+    }
+    async getPayment(paymentId) {
+        const res = await this.http.get(`/v1/payments/intent/${paymentId}`);
+        return res.data.data;
+    }
+    async capturePayment(data) {
+        const res = await this.http.post("/v1/payments/capture", { ...data });
+        return res.data.data;
+    }
+    async refundPayment(data) {
+        const res = await this.http.post("/v1/payments/refund", { ...data });
+        return res.data.data;
+    }
+    async deactivateSubscription(data) {
+        const res = await this.http.post("/v1/payments/subscription/plan/deactivate", { ...data });
+        return res.data.data;
     }
 }
 exports.default = OnepayClient;

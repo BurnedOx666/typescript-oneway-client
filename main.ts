@@ -2,6 +2,32 @@ import axios, { AxiosError, AxiosInstance, AxiosResponse } from "axios";
 import * as jwt from "jsonwebtoken";
 import { enc, HmacSHA256 } from "crypto-js";
 
+// ── Enums ──────────────────────────────────────────────────
+
+export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit";
+
+export type PaymentMethodType = "upi" | "card" | "netbanking" | "wallet";
+
+export type PaymentStatus =
+  | "created"
+  | "pending"
+  | "received"
+  | "success"
+  | "failed"
+  | "processing"
+  | "refunded"
+  | "cancelled";
+
+export type SubscriptionStatus = "active" | "inactive";
+
+export type CaptureMode = "manual" | "automatic";
+
+export type RefundSpeed = "normal" | "optimum";
+
+export type RecurringInterval = "DAY" | "WEEK" | "MONTH";
+
+// ── Envelope & errors ──────────────────────────────────────
+
 export interface OnepayResponse<T = any> {
   status: string;
   code: number;
@@ -10,10 +36,28 @@ export interface OnepayResponse<T = any> {
 }
 
 export class OnepayException extends Error {
-  constructor(public code: number, public message: string) {
-    super(`[${code}] ${message}`);
+  public readonly code: number;
+
+  constructor(code: number, message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.code = code;
+    this.name = "OnepayException";
+    // Keeps `err instanceof OnepayException` working when a consumer compiles
+    // this package down to ES5.
+    Object.setPrototypeOf(this, OnepayException.prototype);
   }
 }
+
+function isOnepayResponse(value: unknown): value is OnepayResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "status" in value &&
+    "code" in value
+  );
+}
+
+// ── Payloads ───────────────────────────────────────────────
 
 export interface ContactPayload {
   name?: string;
@@ -26,25 +70,33 @@ export interface ContactPayload {
   country?: string;
 }
 
+export interface RecurringConfig {
+  interval?: RecurringInterval;
+  interval_count?: number;
+  total_recurrence?: number;
+}
+
 export interface PaymentPayload {
   contact_id: string;
-  provider: "stripe" | "razorpay" | "billdesk" | "xendit";
+  provider: ProviderSlug;
   amount: number;
   currency: string;
   return_url: string;
+  /** Client IP address. IPv4 and IPv6 are both accepted. */
   ip: string;
   user_agent: string;
-  payment_method?: "upi" | "card" | "netbanking" | "wallet";
+  payment_method?: PaymentMethodType;
+  /** ISO 3166-1 alpha-2, uppercase. Resolved from `ip` when omitted. */
   country_code?: string;
   meta_data?: Record<string, any> | null;
-  capture_mode?: "manual" | "automatic";
+  /** Defaults to `"automatic"` server-side. */
+  capture_mode?: CaptureMode;
+  /** Minutes to hold an authorization before it expires. 12–7200, defaults to 2880. */
   capture_expiry_period?: number;
-  refund_speed?: "normal" | "optimum";
-  recurring_conf?: {
-    interval?: "DAY" | "WEEK" | "MONTH";
-    interval_count?: number;
-    total_recurrence?: number;
-  };
+  /** Defaults to `"normal"` server-side. */
+  refund_speed?: RefundSpeed;
+  /** When set, the payment is created as a recurring subscription. */
+  recurring_conf?: RecurringConfig;
 }
 
 export interface CapturePaymentPayload {
@@ -55,12 +107,14 @@ export interface CapturePaymentPayload {
 export interface RefundPaymentPayload {
   payment_id: string;
   amount?: number;
-  speed?: "normal" | "optimum";
+  speed?: RefundSpeed;
 }
 
 export interface DeactivateSubscriptionPayload {
   payment_id: string;
 }
+
+// ── Resources ──────────────────────────────────────────────
 
 export interface PaymentIntent {
   id: string;
@@ -73,27 +127,19 @@ export interface PaymentIntent {
   currency: string;
   return_url: string | null;
   payment_method: string | null;
-  status:
-    | "created"
-    | "pending"
-    | "received"
-    | "success"
-    | "failed"
-    | "processing"
-    | "refunded"
-    | "cancelled";
+  status: PaymentStatus;
   renew_id: string | null;
   plan_id: string | null;
-  subscription_status: "active" | "inactive" | null;
+  subscription_status: SubscriptionStatus | null;
   next_billing_date: string | null;
   provider_id: string;
   contact_id: string;
   merchant_id: string;
   ip: string | null;
   user_agent: string | null;
-  meta_data: object | null;
-  payment_intent: object | null;
-  logs: object | null;
+  meta_data: Record<string, any> | null;
+  payment_intent: Record<string, any> | null;
+  logs: Record<string, any> | null;
 }
 
 export interface PaymentLink {
@@ -103,38 +149,82 @@ export interface PaymentLink {
   payment_intent: PaymentIntent;
 }
 
+/** Payment method as nested inside a `PaymentProvider`. */
 export interface PaymentMethodInfo {
-  slug: string;
+  slug: PaymentMethodType;
   logo: string | null;
+}
+
+/** Payment method as returned by `getPaymentMethods()`. */
+export interface PaymentMethod {
+  id: string;
+  created_at: string;
+  method: PaymentMethodType;
+  logo: string | null;
+  config: Record<string, any> | null;
+  provider: ProviderSlug;
 }
 
 export interface PaymentProvider {
   id: string;
   name: string;
-  slug: "stripe" | "razorpay" | "billdesk" | "xendit";
+  slug: ProviderSlug;
   logo: string | null;
   description: string | null;
   is_recommended: boolean;
   payment_methods: PaymentMethodInfo[];
 }
 
-export function decodeWebhookPayload(payload: string, signature: string) {
-  try {
-    const decoded = jwt.verify(payload, signature, { algorithms: ["HS256"] });
-    return decoded as PaymentIntent;
-  } catch (err) {
-    throw new OnepayException(400, "Invalid webhook signature");
-  }
+export interface SuccessResult {
+  success: boolean;
 }
+
+// ── Webhooks ───────────────────────────────────────────────
+
+/**
+ * Verify and decode a webhook delivery.
+ *
+ * OnePay posts `{ "payload": "<jwt>" }`, where the JWT is the payment record
+ * signed with the webhook's secret using HS256.
+ *
+ * @param payload The `payload` string from the webhook body.
+ * @param secret  The webhook secret from the OnePay dashboard.
+ */
+export function decodeWebhookPayload(
+  payload: string,
+  secret: string
+): PaymentIntent {
+  let decoded: unknown;
+
+  try {
+    decoded = jwt.verify(payload, secret, { algorithms: ["HS256"] });
+  } catch (err) {
+    throw new OnepayException(400, "Invalid webhook signature", { cause: err });
+  }
+
+  if (typeof decoded !== "object" || decoded === null) {
+    throw new OnepayException(400, "Invalid webhook payload");
+  }
+
+  return decoded as PaymentIntent;
+}
+
+// ── Client ─────────────────────────────────────────────────
 
 export default class OnepayClient {
   private readonly http: AxiosInstance;
 
+  /**
+   * @param domain    Base URL of the OnePay API, e.g. `https://api.example.com`.
+   * @param apiKey    Public key, sent as `X-ACCESS-KEY`.
+   * @param secretKey Private key, used to sign each request.
+   * @param timeout   Per-request timeout in **milliseconds**. Defaults to 30s.
+   */
   constructor(
     private readonly domain: string,
     private readonly apiKey: string,
     private readonly secretKey: string,
-    private readonly timeout: number = 30
+    private readonly timeout: number = 30_000
   ) {
     this.http = axios.create({
       baseURL: this.domain,
@@ -154,7 +244,7 @@ export default class OnepayClient {
 
     this.http.interceptors.response.use(
       (res: AxiosResponse<OnepayResponse>) => {
-        if (!res.data) {
+        if (!isOnepayResponse(res.data)) {
           throw new OnepayException(500, "No data received from OnePay API");
         } else if (res.data.status !== "success") {
           throw new OnepayException(
@@ -166,12 +256,34 @@ export default class OnepayClient {
         }
       },
       (error: AxiosError<OnepayResponse>) => {
-        const data = error.response?.data;
-        if (data) {
-          throw new OnepayException(data.code, data.msg || "Unknown error");
-        } else {
-          throw new OnepayException(500, "No data received from OnePay API");
+        const response = error.response;
+
+        if (isOnepayResponse(response?.data)) {
+          throw new OnepayException(
+            response!.data.code,
+            response!.data.msg || "Unknown error",
+            { cause: error }
+          );
         }
+
+        // A response that is not the OnePay envelope — a gateway error page, a
+        // proxy timeout, an HTML 5xx. Report the transport status rather than
+        // reading `code`/`msg` off a body that has neither.
+        if (response) {
+          throw new OnepayException(
+            response.status,
+            `Unexpected response from OnePay API (HTTP ${response.status})`,
+            { cause: error }
+          );
+        }
+
+        // No response at all: DNS failure, connection refused, client timeout,
+        // aborted request. `error.message` is the only thing that says which.
+        throw new OnepayException(
+          500,
+          `Failed to reach OnePay API: ${error.message}`,
+          { cause: error }
+        );
       }
     );
   }
@@ -206,7 +318,11 @@ export default class OnepayClient {
 
   // ── Providers & Payment Methods ────────────────────────────
 
-  public async getProviders(ip?: string, countryCode?: string) {
+  /** Either `ip` or `countryCode` must be supplied. */
+  public async getProviders(
+    ip?: string,
+    countryCode?: string
+  ): Promise<PaymentProvider[]> {
     const res = await this.http.get<OnepayResponse<PaymentProvider[]>>(
       "/v1/payments/providers",
       {
@@ -219,8 +335,12 @@ export default class OnepayClient {
     return res.data.data;
   }
 
-  public async getPaymentMethods(ip?: string, countryCode?: string) {
-    const res = await this.http.get<OnepayResponse<any[]>>(
+  /** Either `ip` or `countryCode` must be supplied. */
+  public async getPaymentMethods(
+    ip?: string,
+    countryCode?: string
+  ): Promise<PaymentMethod[]> {
+    const res = await this.http.get<OnepayResponse<PaymentMethod[]>>(
       "/v1/payments/methods",
       {
         params: {
@@ -234,7 +354,7 @@ export default class OnepayClient {
 
   // ── Payments ───────────────────────────────────────────────
 
-  public async createPayment(data: PaymentPayload) {
+  public async createPayment(data: PaymentPayload): Promise<PaymentLink> {
     const res = await this.http.post<OnepayResponse<PaymentLink>>(
       "/v1/payments/intent",
       { ...data }
@@ -242,31 +362,37 @@ export default class OnepayClient {
     return res.data.data;
   }
 
-  public async getPayment(paymentId: string) {
+  public async getPayment(paymentId: string): Promise<PaymentIntent> {
     const res = await this.http.get<OnepayResponse<PaymentIntent>>(
       `/v1/payments/intent/${paymentId}`
     );
     return res.data.data;
   }
 
-  public async capturePayment(data: CapturePaymentPayload) {
-    const res = await this.http.post<OnepayResponse<{ success: boolean }>>(
+  public async capturePayment(
+    data: CapturePaymentPayload
+  ): Promise<SuccessResult> {
+    const res = await this.http.post<OnepayResponse<SuccessResult>>(
       "/v1/payments/capture",
       { ...data }
     );
     return res.data.data;
   }
 
-  public async refundPayment(data: RefundPaymentPayload) {
-    const res = await this.http.post<OnepayResponse<{ success: boolean }>>(
+  public async refundPayment(
+    data: RefundPaymentPayload
+  ): Promise<SuccessResult> {
+    const res = await this.http.post<OnepayResponse<SuccessResult>>(
       "/v1/payments/refund",
       { ...data }
     );
     return res.data.data;
   }
 
-  public async deactivateSubscription(data: DeactivateSubscriptionPayload) {
-    const res = await this.http.post<OnepayResponse<any>>(
+  public async deactivateSubscription(
+    data: DeactivateSubscriptionPayload
+  ): Promise<Record<string, any>> {
+    const res = await this.http.post<OnepayResponse<Record<string, any>>>(
       "/v1/payments/subscription/plan/deactivate",
       { ...data }
     );
