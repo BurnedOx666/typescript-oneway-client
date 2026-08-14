@@ -2,7 +2,7 @@
 
 TypeScript SDK for the OnePay Payments API. Provides a fully-typed client for managing contacts, creating payments, handling captures/refunds, managing subscriptions, and verifying webhooks.
 
-Requires Node.js 18 or newer.
+Requires Node.js 16.9 or newer (`OnepayException` attaches the originating error via `Error.cause`).
 
 ## Installation
 
@@ -248,7 +248,7 @@ Union types are exported as well: `ProviderSlug`, `PaymentMethodType`, `PaymentS
 - `getPaymentMethods()` returns `PaymentMethod[]` instead of `any[]`.
 - Exported the underlying union types, and `RecurringConfig` / `PaymentMethod` / `SuccessResult`.
 - Documented that `ip` accepts IPv6, matching the API as of 2026-05-29.
-- Build target raised to ES2020; minimum supported Node is 18.
+- Build target raised to ES2020; minimum supported Node is 16.9.
 
 ## License
 

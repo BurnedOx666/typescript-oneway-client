@@ -29,7 +29,7 @@
     "url": "https://github.com/BurnedOx/typescript-oneway-client/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=16.9"
   },
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",
