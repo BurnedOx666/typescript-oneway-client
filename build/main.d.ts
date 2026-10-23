@@ -1,4 +1,4 @@
-export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit";
+export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit" | "coda";
 export type PaymentMethodType = "upi" | "card" | "netbanking" | "wallet";
 export type PaymentStatus = "created" | "pending" | "received" | "success" | "failed" | "processing" | "refunded" | "cancelled";
 export type SubscriptionStatus = "active" | "inactive";
@@ -156,5 +156,6 @@ export default class OnepayClient {
     getPayment(paymentId: string): Promise<PaymentIntent>;
     capturePayment(data: CapturePaymentPayload): Promise<SuccessResult>;
     refundPayment(data: RefundPaymentPayload): Promise<SuccessResult>;
+    /** Stop a recurring subscription: a Xendit plan or a Coda schedule. */
     deactivateSubscription(data: DeactivateSubscriptionPayload): Promise<Record<string, any>>;
 }

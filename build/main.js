@@ -197,6 +197,7 @@ class OnepayClient {
         const res = await this.http.post("/v1/payments/refund", { ...data });
         return res.data.data;
     }
+    /** Stop a recurring subscription: a Xendit plan or a Coda schedule. */
     async deactivateSubscription(data) {
         const res = await this.http.post("/v1/payments/subscription/plan/deactivate", { ...data });
         return res.data.data;

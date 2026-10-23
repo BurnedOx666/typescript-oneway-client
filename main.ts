@@ -4,7 +4,7 @@ import { enc, HmacSHA256 } from "crypto-js";
 
 // ── Enums ──────────────────────────────────────────────────
 
-export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit";
+export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit" | "coda";
 
 export type PaymentMethodType = "upi" | "card" | "netbanking" | "wallet";
 
@@ -389,6 +389,7 @@ export default class OnepayClient {
     return res.data.data;
   }
 
+  /** Stop a recurring subscription: a Xendit plan or a Coda schedule. */
   public async deactivateSubscription(
     data: DeactivateSubscriptionPayload
   ): Promise<Record<string, any>> {

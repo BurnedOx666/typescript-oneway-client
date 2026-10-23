@@ -17,7 +17,7 @@ yarn add git+https://github.com/BurnedOx/typescript-oneway-client.git
 To pin a release, append the tag:
 
 ```bash
-npm install git+https://github.com/BurnedOx/typescript-oneway-client.git#1.3.0
+npm install git+https://github.com/BurnedOx/typescript-oneway-client.git#1.4.0
 ```
 
 ## Quick Start
@@ -130,6 +130,24 @@ const result = await client.createPayment({
 console.log(result.recurring); // true
 ```
 
+With `provider: "coda"`, recurring is card-only: the first payment saves the card on Coda's
+page and OnePay charges it every cycle. In a country Coda cannot save cards in, the payment is
+created as a one-time payment and `result.recurring` is `false`.
+
+```typescript
+const result = await client.createPayment({
+  contact_id: contactId,
+  provider: "coda",
+  amount: 19.9,
+  currency: "MYR",
+  country_code: "MY",
+  return_url: "https://yourdomain.com/subscription/callback",
+  ip: "103.21.58.1",
+  user_agent: "Mozilla/5.0...",
+  recurring_conf: { interval: "MONTH", interval_count: 1, total_recurrence: 12 },
+});
+```
+
 ### Get Payment Status
 
 ```typescript
@@ -168,6 +186,8 @@ await client.refundPayment({
 ```
 
 ### Deactivate a Subscription
+
+Works for Xendit plans and Coda schedules: no further cycle is charged.
 
 ```typescript
 await client.deactivateSubscription({ payment_id: "..." });
@@ -236,6 +256,11 @@ try {
 Union types are exported as well: `ProviderSlug`, `PaymentMethodType`, `PaymentStatus`, `SubscriptionStatus`, `CaptureMode`, `RefundSpeed`, `RecurringInterval`.
 
 ## Changelog
+
+### 1.4.0
+
+- `"coda"` added to `ProviderSlug`, so `createPayment({ provider: "coda" })` type-checks.
+- `deactivateSubscription()` documented for Coda schedules as well as Xendit plans.
 
 ### 1.3.0
 
