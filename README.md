@@ -7,17 +7,17 @@ Requires Node.js 16.9 or newer (`OnepayException` attaches the originating error
 ## Installation
 
 ```bash
-npm install git+https://github.com/BurnedOx/typescript-oneway-client.git
+npm install git+https://github.com/BurnedOx666/typescript-oneway-client.git
 ```
 
 ```bash
-yarn add git+https://github.com/BurnedOx/typescript-oneway-client.git
+yarn add git+https://github.com/BurnedOx666/typescript-oneway-client.git
 ```
 
 To pin a release, append the tag:
 
 ```bash
-npm install git+https://github.com/BurnedOx/typescript-oneway-client.git#1.4.0
+npm install git+https://github.com/BurnedOx666/typescript-oneway-client.git#1.4.0
 ```
 
 ## Quick Start
