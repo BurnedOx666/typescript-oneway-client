@@ -1,4 +1,4 @@
-export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit";
+export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit" | "razergold";
 export type PaymentMethodType = "upi" | "card" | "netbanking" | "wallet";
 export type PaymentStatus = "created" | "pending" | "received" | "success" | "failed" | "processing" | "refunded" | "cancelled";
 export type SubscriptionStatus = "active" | "inactive";

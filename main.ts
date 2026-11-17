@@ -4,7 +4,7 @@ import { enc, HmacSHA256 } from "crypto-js";
 
 // ── Enums ──────────────────────────────────────────────────
 
-export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit";
+export type ProviderSlug = "stripe" | "razorpay" | "billdesk" | "xendit" | "razergold";
 
 export type PaymentMethodType = "upi" | "card" | "netbanking" | "wallet";
 

@@ -17,7 +17,7 @@ yarn add git+https://github.com/BurnedOx/typescript-oneway-client.git
 To pin a release, append the tag:
 
 ```bash
-npm install git+https://github.com/BurnedOx/typescript-oneway-client.git#1.3.0
+npm install git+https://github.com/BurnedOx/typescript-oneway-client.git#1.5.0
 ```
 
 ## Quick Start
@@ -108,6 +108,29 @@ Optional fields and their server-side defaults:
 | `capture_mode` | `"automatic"` | `"manual"` requires a provider that allows it |
 | `capture_expiry_period` | `2880` | Minutes to hold an authorization; 12–7200 |
 | `refund_speed` | `"normal"` | `"normal"` \| `"optimum"` |
+
+### Create a Razer Gold Payment
+
+With `provider: "razergold"` the payer completes the payment on Razer Gold's hosted page:
+redirect the browser to `result.link` as a top-level navigation, not in an iframe. Without
+`payment_method` the page is Razer's Payment Wall; with it, the payer goes straight to the
+Razer channel configured for that method. Razer's page stays valid for 20 minutes, and a
+retry is a new `createPayment` call, which returns a new `payment_id`. Razer Gold payments
+are one-time only: `recurring_conf`, `capturePayment` and `refundPayment` are not available
+for this provider.
+
+```typescript
+const result = await client.createPayment({
+  contact_id: contactId,
+  provider: "razergold",
+  amount: 10.0,
+  currency: "MYR",
+  country_code: "MY",
+  return_url: "https://yourdomain.com/payment/callback",
+  ip: "103.21.58.1",
+  user_agent: "Mozilla/5.0...",
+});
+```
 
 ### Create a Recurring / Subscription Payment
 
@@ -236,6 +259,10 @@ try {
 Union types are exported as well: `ProviderSlug`, `PaymentMethodType`, `PaymentStatus`, `SubscriptionStatus`, `CaptureMode`, `RefundSpeed`, `RecurringInterval`.
 
 ## Changelog
+
+### 1.5.0
+
+- `"razergold"` added to `ProviderSlug`, so `createPayment({ provider: "razergold" })` type-checks.
 
 ### 1.3.0
 
