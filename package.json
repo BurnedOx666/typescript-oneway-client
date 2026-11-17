@@ -22,11 +22,11 @@
   "description": "TypeScript client for OnePay API",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BurnedOx/typescript-oneway-client.git"
+    "url": "git+https://github.com/BurnedOx666/typescript-oneway-client.git"
   },
-  "homepage": "https://github.com/BurnedOx/typescript-oneway-client#readme",
+  "homepage": "https://github.com/BurnedOx666/typescript-oneway-client#readme",
   "bugs": {
-    "url": "https://github.com/BurnedOx/typescript-oneway-client/issues"
+    "url": "https://github.com/BurnedOx666/typescript-oneway-client/issues"
   },
   "engines": {
     "node": ">=16.9"
